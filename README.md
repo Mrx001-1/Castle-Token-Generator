@@ -1,4 +1,4 @@
-````md
+
 # Castle Token Generator
 
 This tool generates **Castle browser request tokens** using a **headless Chromium** environment.  
@@ -12,7 +12,7 @@ Useful for automation tools (OB2, custom bots, HTTP clients) that need a valid C
 2. The server launches a **headless browser**, loads the Castle script, and calls:
    ```js
    Castle.configure({ pk: pk }).createRequestToken();
-````
+
 
 3. The token is stored and can be retrieved from `/token?task_id=<id>`.
 
