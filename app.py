@@ -18,17 +18,65 @@ def castle_page(task_id):
         return "<h3>Invalid task</h3>", 404
     return f"""
     <html><body>
-    <script src="{t['js']}"></script>
     <script>
-    async function go(){{
+      const JS_URL = "{t['js']}";
+      const PK = "{t['pk']}";
+
+      window.addEventListener('error', function(e){{
+        // Swallow the "import statement outside a module" error — expected for ES-module bundles.
+        if (e.message && e.message.indexOf('import statement') !== -1) return;
+      }});
+
+      function findCastle(obj){{
+        if(!obj) return null;
+        if(typeof obj.configure === 'function') return obj;
+        if(obj.default && typeof obj.default.configure === 'function') return obj.default;
+        if(obj.Castle && typeof obj.Castle.configure === 'function') return obj.Castle;
+        return null;
+      }}
+
+      async function tryClassicScript(){{
+        return new Promise((resolve) => {{
+          const s = document.createElement('script');
+          s.src = JS_URL;
+          s.onload = () => setTimeout(() => {{
+            const lib = findCastle(window.Castle) || findCastle(window['@castleio/castle-js']);
+            resolve(lib);
+          }}, 300);
+          s.onerror = () => resolve(null);
+          document.head.appendChild(s);
+        }});
+      }}
+
+      async function tryModuleImport(){{
         try {{
-            const castle = Castle.configure({{pk:"{t['pk']}"}}); 
-            const token = await castle.createRequestToken();
-            console.log("CASTLE_TOKEN=" + token);
-        }}catch(e){{console.log("CASTLE_ERROR=" + e.message);}}
-    }}
-    window.onload=go;
-    </script></body></html>
+          const mod = await import(JS_URL);
+          return findCastle(mod);
+        }} catch(e) {{
+          console.log("MODULE_IMPORT_ERR=" + e.message);
+          return null;
+        }}
+      }}
+
+      (async function(){{
+        try {{
+          let CastleLib = await tryClassicScript();
+          if(!CastleLib) CastleLib = await tryModuleImport();
+
+          if(!CastleLib){{
+            console.log("CASTLE_ERROR=Castle SDK could not be loaded as classic script or ES module");
+            return;
+          }}
+
+          const castle = CastleLib.configure({{pk: PK}});
+          const token = await castle.createRequestToken();
+          console.log("CASTLE_TOKEN=" + token);
+        }} catch(e) {{
+          console.log("CASTLE_ERROR=" + e.message + " || " + (e.stack || ''));
+        }}
+      }})();
+    </script>
+    </body></html>
     """
 
 
@@ -37,6 +85,7 @@ def generate_token(task_id, pk, js_url):
 
     def on_console(msg):
         text = msg.text
+        print(f"[browser:{task_id}] {msg.type}: {text}")
         if text.startswith("CASTLE_TOKEN="):
             token_holder["value"] = text.split("CASTLE_TOKEN=")[1].strip()
             print(f"[OK] Token captured for {task_id}")
@@ -46,6 +95,9 @@ def generate_token(task_id, pk, js_url):
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
             page.on("console", on_console)
+            page.on("pageerror", lambda exc: print(f"[pageerror:{task_id}] {exc}"))
+            page.on("requestfailed", lambda req: print(f"[reqfail:{task_id}] {req.url} {req.failure}"))
+            page.on("response", lambda resp: print(f"[resp:{task_id}] {resp.status} {resp.url}") if 'castle' in resp.url.lower() or resp.url.endswith('.js') else None)
             page.goto(f"http://127.0.0.1:5001/castle/{task_id}")
             time.sleep(8)
             browser.close()
